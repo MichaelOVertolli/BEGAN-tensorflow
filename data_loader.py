@@ -21,12 +21,12 @@ def get_loader(root, batch_size, scale_size, data_format, split=None, is_graysca
 
     with Image.open(paths[0]) as img:
         w, h = img.size
-        shape = [h, w, 3]
+        shape = [h, w, 1]
 
     filename_queue = tf.train.string_input_producer(list(paths), shuffle=False, seed=seed)
     reader = tf.WholeFileReader()
     filename, data = reader.read(filename_queue)
-    image = tf_decode(data, channels=3)
+    image = tf_decode(data, channels=1)
 
     if is_grayscale:
         image = tf.image.rgb_to_grayscale(image)
