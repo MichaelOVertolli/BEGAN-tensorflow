@@ -48,38 +48,34 @@ def GeneratorRCNN(x, input_channel, z_num, repeat_num, hidden_num, data_format):
     return z, variables
 
 
-def DiscriminatorGCNN(x, input_channel, z_num, repeat_num, hidden_num, data_format):
-    with tf.variable_scope("D") as vs:
+def GeneratorGrpRCNN(x, input_channel, z_num, repeat_num, hidden_num):
+    w_init = tf.contrib.layers.xavier_initializer()
+    with tf.variable_scope("GG_r") as vs:
         # Encoder
-        x = slim.conv2d(x, hidden_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
+        gconv_i, gconv_s, w_s = gconv2d_util('Z2', 'D4', 1, hidden_num, 3)
+        x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
+                    gconv_shape_info=gconv_s, data_format='NHWC')
 
         prev_channel_num = hidden_num
         for idx in range(repeat_num):
-            channel_num = hidden_num * (idx + 1)
-            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
-            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
-            if idx < repeat_num + 2:
-                x = slim.conv2d(x, channel_num, 3, 2, activation_fn=tf.nn.elu, data_format=data_format)
-                #x = tf.contrib.layers.max_pool2d(x, [2, 2], [2, 2], padding='VALID')
+            channel_num = prev_channel_num * (idx + 1)
+            gconv_i, gconv_s, w_s = gconv2d_util('D4', 'D4', prev_channel_num, channel_num, 3)
+            gconv_i2, gconv_s2, w_s2 = gconv2d_util('D4', 'D4', channel_num, channel_num, 3)
+            x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
+                        gconv_shape_info=gconv_s, data_format='NHWC')
+            x = gconv2d(x, w_init(w_s2), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i2,
+                        gconv_shape_info=gconv_s2, data_format='NHWC')
+            #if idx < repeat_num:
+            x = gconv2d(x, w_init(w_s), [1, 2, 2, 1], 'SAME', gconv_indices=gconv_i2,
+                        gconv_shape_info=gconv_s2, data_format='NHWC')
+            prev_channel_num = channel_num
 
-        x = tf.reshape(x, [-1, np.prod([7, 7, channel_num])])
-        z = x = slim.fully_connected(x, z_num, activation_fn=None)
 
-        # Decoder
-        num_output = int(np.prod([7, 7, hidden_num]))
-        x = slim.fully_connected(x, num_output, activation_fn=None)
-        x = reshape(x, 7, 7, hidden_num, data_format)
-        
-        for idx in range(repeat_num):
-            x = slim.conv2d(x, hidden_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
-            x = slim.conv2d(x, hidden_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
-            #if idx < repeat_num - 1:
-            x = upscale(x, 2, data_format)
-
-        out = slim.conv2d(x, input_channel, 3, 1, activation_fn=None, data_format=data_format)
+        x = tf.reshape(x, [-1, np.prod(tf.shape(x))/])
+        z = slim.fully_connected(x, z_num, activation_fn=None)
 
     variables = tf.contrib.framework.get_variables(vs)
-    return out, z, variables
+    return z, variables
 
 
 def DiscriminatorCNN(x, input_channel, z_num, repeat_num, hidden_num, data_format):
