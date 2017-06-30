@@ -46,7 +46,7 @@ train_arg.add_argument('--gpu_num', type=str, default='1')
 
 # Misc
 misc_arg = add_argument_group('Misc')
-misc_arg.add_argument('--name', type=str, default='base')
+misc_arg.add_argument('--name', type=str, default='reverse')
 misc_arg.add_argument('--load_path', type=str, default='')
 misc_arg.add_argument('--log_step', type=int, default=50)
 misc_arg.add_argument('--save_step', type=int, default=5000)
