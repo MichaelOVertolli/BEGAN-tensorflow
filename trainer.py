@@ -157,9 +157,23 @@ class Trainer(object):
                 print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f} Loss_G_r:  measure: {:.4f}, k_t: {:.4f}". \
                       format(step, self.max_step, d_loss, g_loss, measure, k_t))
 
-            if step % (self.log_step * 10) == 0:
-                x_fake = self.generate(z_fixed, self.model_dir, idx=step)
+            if step % (self.log_step * 40) == 0:
+                large_fake = None
+                x_fake = None
+                z_fixed_ = z_fixed
+                for i in range(6):
+                    x_fake = self.generate(z_fixed_, self.model_dir, idx=step)
+                    if large_fake is None:
+                        large_fake = x_fake
+                    else:
+                        large_fake = np.concatenate([large_fake, x_fake])
+                    z_fixed_ = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
+                #print(large_fake.shape)
+                f = '{}/{}_G.png'.format(self.model_dir, step)
+                save_image(large_fake, f, nrow=8)
+                print("[*] Samples saved: {}".format(f))
                 self.autoencode(x_fixed, self.model_dir, idx=step, x_fake=x_fake)
+                self.interpolate_live_G(z_fixed, self.model_dir, idx=step)
 
             if step % self.lr_update_step == self.lr_update_step - 1:
                 self.sess.run([self.g_lr_update, self.g_r_lr_update, self.d_lr_update])
@@ -256,8 +270,8 @@ class Trainer(object):
         x = self.sess.run(self.G, {self.z: inputs})
         if path is None and save:
             path = os.path.join(root_path, '{}_G.png'.format(idx))
-            save_image(x, path)
-            print("[*] Samples saved: {}".format(path))
+            #save_image(x, path)
+            #print("[*] Samples saved: {}".format(path))
         return x
 
     def autoencode(self, inputs, path, idx=None, x_fake=None):
@@ -284,6 +298,20 @@ class Trainer(object):
     def decode(self, z):
         return self.sess.run(self.AE_x, {self.D_z: z})
 
+    def interpolate_live_G(self, z_fixed, root_path, idx):
+        z_flex = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
+        generated = []
+        for _, ratio in enumerate(np.linspace(0, 1, 10)):
+            z = np.stack([slerp(ratio, r1, r2) for r1, r2 in zip(z_fixed, z_flex)])
+            z_decode = self.generate(z, save=False)
+            generated.append(z_decode)
+
+        generated = np.stack(generated).transpose([1, 0, 2, 3, 4])
+
+        all_img_num = np.prod(generated.shape[:2])
+        batch_generated = np.reshape(generated, [all_img_num] + list(generated.shape[2:]))
+        save_image(batch_generated, os.path.join(root_path, 'test{}_interp_G.png'.format(idx)), nrow=10)
+    
     def interpolate_G(self, real_batch, step=0, root_path='.', train_epoch=0):
         batch_size = len(real_batch)
         half_batch_size = int(batch_size/2)

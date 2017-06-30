@@ -18,9 +18,9 @@ def to_img(array, degree):
 def rotate_data(data, degree):
     n, _ = data.shape
     steps = 360/degree
-    string = './data/mnist/train/{:06d}.png'
+    string = './data/mnist/train_rot90/{:06d}.png'
     for j in range(n):
-        if j/n % 10 == 0:
+        if j/float(n)*100 % 10 < 0.1:
             print str(j/float(n))
         for k in range(steps):
             img = to_img(data[j], degree*k)
