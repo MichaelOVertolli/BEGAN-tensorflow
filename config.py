@@ -18,13 +18,13 @@ net_arg.add_argument('--input_scale_size', type=int, default=28,
                      help='input image will be resized with the given value as width and height')
 net_arg.add_argument('--conv_hidden_num', type=int, default=64,
                      choices=[64, 128],help='n in the paper')
-net_arg.add_argument('--z_num', type=int, default=128, choices=[32, 64, 128])
+net_arg.add_argument('--z_num', type=int, default=64, choices=[32, 64, 128])
 
 # Data
 data_arg = add_argument_group('Data')
 data_arg.add_argument('--dataset', type=str, default='CelebA')
 data_arg.add_argument('--split', type=str, default='train')
-data_arg.add_argument('--batch_size', type=int, default=32)
+data_arg.add_argument('--batch_size', type=int, default=16)
 data_arg.add_argument('--grayscale', type=str2bool, default=True)
 data_arg.add_argument('--num_worker', type=int, default=4)
 
@@ -34,14 +34,15 @@ train_arg.add_argument('--is_train', type=str2bool, default=True)
 train_arg.add_argument('--optimizer', type=str, default='adam')
 train_arg.add_argument('--max_step', type=int, default=200000)
 train_arg.add_argument('--lr_update_step', type=int, default=100000, choices=[100000, 75000])
-train_arg.add_argument('--d_lr', type=float, default=0.00002)
-train_arg.add_argument('--g_lr', type=float, default=0.0001)
+train_arg.add_argument('--d_lr', type=float, default=0.0005)
+train_arg.add_argument('--g_lr', type=float, default=0.0005)
 train_arg.add_argument('--lr_lower_boundary', type=float, default=0.00002)
 train_arg.add_argument('--beta1', type=float, default=0.5)
 train_arg.add_argument('--beta2', type=float, default=0.999)
 train_arg.add_argument('--gamma', type=float, default=0.5)
 train_arg.add_argument('--lambda_k', type=float, default=0.001)
 train_arg.add_argument('--use_gpu', type=str2bool, default=True)
+train_arg.add_argument('--gpu_num', type=str, default='1')
 
 # Misc
 misc_arg = add_argument_group('Misc')
