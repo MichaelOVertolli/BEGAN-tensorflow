@@ -25,3 +25,13 @@ def rotate_data(data, degree):
         for k in range(steps):
             img = to_img(data[j], degree*k)
             img.save(string.format(j*steps + k))
+
+
+def save_data(data):
+    n, _ = data.shape
+    string = './data/mnist/train_norotate/{:06d}.png'
+    for j in range(n):
+        if j/n % 10 == 0:
+            print str(j/float(n))
+            img = to_img(data[j], 0)
+            img.save(string.format(j))

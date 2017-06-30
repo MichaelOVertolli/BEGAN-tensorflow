@@ -51,16 +51,16 @@ def GeneratorGrpCNN(z, hidden_num, output_num, repeat_num, reuse):
                     gconv_shape_info=gconv_s, data_format='NHWC')
         #x = tf.nn.relu(x)
         gconv_i, gconv_s, w_s = gconv2d_util('D4', 'D4', hidden_num, hidden_num, 3)
-        #x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
-        #            gconv_shape_info=gconv_s, data_format='NHWC')
+        x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
+                    gconv_shape_info=gconv_s, data_format='NHWC')
         x = upscale(x, 2, 'NHWC')
         #x = tf.nn.relu(x)
         for idx in range(repeat_num - 1):
             x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
                         gconv_shape_info=gconv_s, data_format='NHWC')
             #x = tf.nn.relu(x)
-            #x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
-            #            gconv_shape_info=gconv_s, data_format='NHWC')
+            x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
+                        gconv_shape_info=gconv_s, data_format='NHWC')
             #if idx < repeat_num - 1:
             x = upscale(x, 2, 'NHWC')
             #x = tf.nn.relu(x)
@@ -92,8 +92,8 @@ def GeneratorGrpRCNN(x, input_channel, z_num, repeat_num, hidden_num):
             gconv_i2, gconv_s2, w_s2 = gconv2d_util('D4', 'D4', channel_num, channel_num, 3)
             x = gconv2d(x, w_init(w_s), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i,
                         gconv_shape_info=gconv_s, data_format='NHWC')
-            #x = gconv2d(x, w_init(w_s2), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i2,
-            #            gconv_shape_info=gconv_s2, data_format='NHWC')
+            x = gconv2d(x, w_init(w_s2), [1, 1, 1, 1], 'SAME', gconv_indices=gconv_i2,
+                        gconv_shape_info=gconv_s2, data_format='NHWC')
             #if idx < repeat_num:
             x = gconv2d(x, w_init(w_s2), [1, 2, 2, 1], 'SAME', gconv_indices=gconv_i2,
                         gconv_shape_info=gconv_s2, data_format='NHWC')

@@ -119,8 +119,7 @@ class Trainer(object):
             self.build_test_model()
 
     def train(self):
-        #changed
-        z_fixed = np.random.uniform(0, 1, size=(self.batch_size, self.z_num))
+        z_fixed = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
 
         x_fixed = self.get_image_from_loader()
         save_image(x_fixed, '{}/x_fixed.png'.format(self.model_dir))
@@ -137,7 +136,7 @@ class Trainer(object):
                 fetch_dict.update({
                     "summary": self.summary_op,
                     "g_loss": self.g_loss,
-                    "g_r_loss": self.g_r_loss,
+                    #"g_r_loss": self.g_r_loss,
                     "d_loss": self.d_loss,
                     "k_t": self.k_t,
                 })
@@ -151,12 +150,12 @@ class Trainer(object):
                 self.summary_writer.flush()
 
                 g_loss = result['g_loss']
-                g_r_loss = result['g_r_loss']
+                #g_r_loss = result['g_r_loss']
                 d_loss = result['d_loss']
                 k_t = result['k_t']
 
-                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f} Loss_G_r: {:.6f}  measure: {:.4f}, k_t: {:.4f}". \
-                      format(step, self.max_step, d_loss, g_loss, g_r_loss, measure, k_t))
+                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f} Loss_G_r:  measure: {:.4f}, k_t: {:.4f}". \
+                      format(step, self.max_step, d_loss, g_loss, measure, k_t))
 
             if step % (self.log_step * 10) == 0:
                 x_fake = self.generate(z_fixed, self.model_dir, idx=step)
@@ -176,16 +175,16 @@ class Trainer(object):
                 (tf.shape(x)[0], self.z_num), minval=-1.0, maxval=1.0)
         self.k_t = tf.Variable(0., trainable=False, name='k_t')
 
-        G, self.G_var = GeneratorGrpCNN(
+        G, self.G_var = GeneratorCNN(
                 self.z, self.conv_hidden_num, self.channel,
-                self.repeat_num, reuse=False)
+                self.repeat_num, reuse=False, data_format=self.data_format)
 
-        G_r, self.G_r_var = GeneratorGrpRCNN(G, self.channel, self.z_num, self.repeat_num,
-                                             self.conv_hidden_num)
+        #G_r, self.G_r_var = GeneratorGrpRCNN(G, self.channel, self.z_num, self.repeat_num,
+        #                                     self.conv_hidden_num)
 
-        d_out, self.D_z, self.D_var = DiscriminatorGrpCNN(
+        d_out, self.D_z, self.D_var = DiscriminatorCNN(
                 tf.concat([G, x], 0), self.channel, self.z_num, self.repeat_num,
-                self.conv_hidden_num)
+                self.conv_hidden_num, self.data_format)
         AE_G, AE_x = tf.split(d_out, 2)
 
         self.G = denorm_img(G, self.data_format)
@@ -197,17 +196,17 @@ class Trainer(object):
             raise Exception("[!] Caution! Paper didn't use {} opimizer other than Adam".format(config.optimizer))
 
         g_optimizer, d_optimizer = optimizer(self.g_lr), optimizer(self.d_lr)
-        g_r_optimizer = optimizer(self.g_r_lr)
+        #g_r_optimizer = optimizer(self.g_r_lr)
 
         self.d_loss_real = tf.reduce_mean(tf.abs(AE_x - x))
         self.d_loss_fake = tf.reduce_mean(tf.abs(AE_G - G))
 
         self.d_loss = self.d_loss_real - self.k_t * self.d_loss_fake
         self.g_loss = tf.reduce_mean(tf.abs(AE_G - G))
-        self.g_r_loss = tf.reduce_mean(tf.abs(G_r - self.z))#tf.nn.sigmoid_cross_entropy_with_logits(labels=self.z, logits=G_r)
+        #self.g_r_loss = tf.reduce_mean(tf.abs(G_r - self.z))#tf.nn.sigmoid_cross_entropy_with_logits(labels=self.z, logits=G_r)
 
         d_optim = d_optimizer.minimize(self.d_loss, var_list=self.D_var)
-        g_r_optim = g_r_optimizer.minimize(self.g_r_loss, var_list=self.G_r_var)
+        #g_r_optim = g_r_optimizer.minimize(self.g_r_loss, var_list=self.G_r_var)
         g_optim = g_optimizer.minimize(self.g_loss, global_step=self.step, var_list=self.G_var)
 
         self.balance = self.gamma * self.d_loss_real - self.g_loss
@@ -226,12 +225,12 @@ class Trainer(object):
             tf.summary.scalar("loss/d_loss_real", self.d_loss_real),
             tf.summary.scalar("loss/d_loss_fake", self.d_loss_fake),
             tf.summary.scalar("loss/g_loss", self.g_loss),
-            tf.summary.scalar("loss/g_r_loss", self.g_r_loss),
+            #tf.summary.scalar("loss/g_r_loss", self.g_r_loss),
             tf.summary.scalar("misc/measure", self.measure),
             tf.summary.scalar("misc/k_t", self.k_t),
             tf.summary.scalar("misc/d_lr", self.d_lr),
             tf.summary.scalar("misc/g_lr", self.g_lr),
-            tf.summary.scalar("misc/g_r_lr", self.g_r_lr),
+            #tf.summary.scalar("misc/g_r_lr", self.g_r_lr),
             tf.summary.scalar("misc/balance", self.balance),
         ])
 
