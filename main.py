@@ -32,8 +32,11 @@ def main(config):
         trainer = Trainer(config, data_loader)
 
         if config.is_train:
-            save_config(config)
-            trainer.train()
+            if config.reverse:
+                trainer.train_reverse()
+            else:
+                save_config(config)
+                trainer.train()
         else:
             if not config.load_path:
                 raise Exception("[!] You should specify `load_path` to load a pretrained model")

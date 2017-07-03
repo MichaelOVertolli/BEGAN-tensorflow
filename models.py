@@ -21,20 +21,25 @@ def GeneratorCNN(z, hidden_num, output_num, repeat_num, data_format, reuse):
     return out, variables
 
 
+
+
+
 def GeneratorRCNN(x, input_channel, z_num, repeat_num, hidden_num, data_format):
     with tf.variable_scope("G_r") as vs:
-        x = slim.conv2d(x, hidden_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
+        x = slim.conv2d(x, hidden_num, 3, 1, activation_fn=tf.nn.elu, normalizer_fn=slim.batch_norm, data_format=data_format)
 
         prev_channel_num = hidden_num
         for idx in range(repeat_num):
             channel_num = hidden_num * (idx + 1)
-            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
-            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, data_format=data_format)
+            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, normalizer_fn=slim.batch_norm, data_format=data_format)
+            x = slim.conv2d(x, channel_num, 3, 1, activation_fn=tf.nn.elu, normalizer_fn=slim.batch_norm, data_format=data_format)
             #if idx < repeat_num + 2:
-            x = slim.conv2d(x, channel_num, 3, 2, activation_fn=tf.nn.elu, data_format=data_format)
+            x = slim.conv2d(x, channel_num, 3, 2, activation_fn=tf.nn.elu, normalizer_fn=slim.batch_norm, data_format=data_format)
 
         x = tf.reshape(x, [-1, np.prod([7, 7, channel_num])], data_format)
         z = slim.fully_connected(x, z_num, activation_fn=None)
+        #z = tf.nn.softsign(z)
+        #z = tf.sigmoid(z) -- worse
 
     variables = tf.contrib.framework.get_variables(vs)
     return z, variables

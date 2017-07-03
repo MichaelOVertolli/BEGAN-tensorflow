@@ -8,6 +8,7 @@ from glob import glob
 from tqdm import trange
 from itertools import chain
 from collections import deque
+from tensorflow.python.ops import variables
 
 from models import *
 from utils import save_image
@@ -61,10 +62,9 @@ class Trainer(object):
 
         self.g_lr = tf.Variable(config.g_lr, name='g_lr')
         self.d_lr = tf.Variable(config.d_lr, name='d_lr')
-        self.g_r_lr = tf.Variable(config.d_lr, name='g_r_lr')
 
         self.g_lr_update = tf.assign(self.g_lr, tf.maximum(self.g_lr * 0.5, config.lr_lower_boundary), name='g_lr_update')
-        self.g_r_lr_update = tf.assign(self.g_r_lr, tf.maximum(self.g_r_lr * 0.5, config.lr_lower_boundary), name='g_r_lr_update')
+        
         self.d_lr_update = tf.assign(self.d_lr, tf.maximum(self.d_lr * 0.5, config.lr_lower_boundary), name='d_lr_update')
 
         self.gamma = config.gamma
@@ -92,12 +92,26 @@ class Trainer(object):
 
         self.is_train = config.is_train
         self.build_model()
-
-        self.saver = tf.train.Saver()
+        
+        if config.reverse:
+            loadable = variables._all_saveable_objects()
+            with tf.variable_scope('g_r_lr') as vs:
+                self.g_r_lr = tf.Variable(config.g_r_lr, name='g_r_lr')
+                self.g_r_lr_update = tf.assign(self.g_r_lr,
+                                               tf.maximum(self.g_r_lr * 0.5, config.lr_lower_boundary),
+                                               name='g_r_lr_update')
+            g_r_vars = tf.contrib.framework.get_variables(vs)
+            rev_vars = self.build_reverse_model()
+            local_init_op = tf.variables_initializer(self.G_r_var+rev_vars+g_r_vars)
+        else:
+            loadable = None
+            local_init_op = 0
         self.summary_writer = tf.summary.FileWriter(self.model_dir)
-
+        
+        self.saver = tf.train.Saver(var_list=loadable)
         sv = tf.train.Supervisor(logdir=self.model_dir,
                                 is_chief=True,
+                                local_init_op=local_init_op,
                                 saver=self.saver,
                                 summary_op=None,
                                 summary_writer=self.summary_writer,
@@ -109,7 +123,7 @@ class Trainer(object):
         sess_config = tf.ConfigProto(allow_soft_placement=True,
                                     gpu_options=gpu_options)
 
-        self.sess = sv.prepare_or_wait_for_session(config=sess_config)
+        self.sess = sv.prepare_or_wait_for_session(config=sess_config)    
 
         if not self.is_train:
             # dirty way to bypass graph finilization error
@@ -117,6 +131,32 @@ class Trainer(object):
             g._finalized = False
 
             self.build_test_model()
+
+
+    def train_reverse(self):
+        for step in trange(self.start_step, self.max_step):
+            fetch_dict = {
+                "g_r_optim": self.g_r_optim,
+            }
+            if step % self.log_step == 0:
+                fetch_dict.update({
+                    "summary": self.summary_op_r,
+                    "g_r_loss": self.g_r_loss,
+                    "g_r_lossl1": self.g_r_lossl1,
+                })
+            result = self.sess.run(fetch_dict)
+            if step % self.log_step == 0:
+                self.summary_writer.add_summary(result['summary'], step)
+                self.summary_writer.flush()
+                
+                g_r_loss = result['g_r_loss']
+                g_r_lossl1 = result['g_r_lossl1']
+
+                print("[{}/{}] Loss_G_r: {:.6f} Loss_G_r_l1 {:.6f}". \
+                      format(step, self.max_step, g_r_loss, g_r_lossl1))
+
+            if step % self.lr_update_step == self.lr_update_step - 1:
+                self.sess.run([self.g_r_lr_update])
 
     def train(self):
         z_fixed = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
@@ -136,7 +176,6 @@ class Trainer(object):
                 fetch_dict.update({
                     "summary": self.summary_op,
                     "g_loss": self.g_loss,
-                    "g_r_loss": self.g_r_loss,
                     "d_loss": self.d_loss,
                     "k_t": self.k_t,
                 })
@@ -150,12 +189,11 @@ class Trainer(object):
                 self.summary_writer.flush()
 
                 g_loss = result['g_loss']
-                g_r_loss = result['g_r_loss']
                 d_loss = result['d_loss']
                 k_t = result['k_t']
 
-                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f} Loss_G_r: {:.6f}  measure: {:.4f}, k_t: {:.4f}". \
-                      format(step, self.max_step, d_loss, g_loss, g_r_loss, measure, k_t))
+                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f}  measure: {:.4f}, k_t: {:.4f}". \
+                      format(step, self.max_step, d_loss, g_loss, measure, k_t))
 
             if step % (self.log_step * 40) == 0:
                 large_fake = None
@@ -176,7 +214,7 @@ class Trainer(object):
                 self.interpolate_live_G(z_fixed, self.model_dir, idx=step)
 
             if step % self.lr_update_step == self.lr_update_step - 1:
-                self.sess.run([self.g_lr_update, self.g_r_lr_update, self.d_lr_update])
+                self.sess.run([self.g_lr_update, self.d_lr_update])
                 #cur_measure = np.mean(measure_history)
                 #if cur_measure > prev_measure * 0.99:
                 #prev_measure = cur_measure
@@ -187,15 +225,14 @@ class Trainer(object):
 
         self.z = tf.random_uniform(
                 (tf.shape(x)[0], self.z_num), minval=-1.0, maxval=1.0)
+        #k = tf.Print(self.z, [self.z[0]], message='base model: ')
         self.k_t = tf.Variable(0., trainable=False, name='k_t')
 
         G, self.G_var = GeneratorCNN(
                 self.z, self.conv_hidden_num, self.channel,
                 self.repeat_num, reuse=False, data_format=self.data_format)
-
-        G_r, self.G_r_var = GeneratorRCNN(G, self.channel, self.z_num, self.repeat_num,
-                                          self.conv_hidden_num, self.data_format)
-
+        self.G_ = G
+        
         d_out, self.D_z, self.D_var = DiscriminatorCNN(
                 tf.concat([G, x], 0), self.channel, self.z_num, self.repeat_num,
                 self.conv_hidden_num, self.data_format)
@@ -210,17 +247,14 @@ class Trainer(object):
             raise Exception("[!] Caution! Paper didn't use {} opimizer other than Adam".format(config.optimizer))
 
         g_optimizer, d_optimizer = optimizer(self.g_lr), optimizer(self.d_lr)
-        g_r_optimizer = optimizer(self.g_r_lr)
 
         self.d_loss_real = tf.reduce_mean(tf.abs(AE_x - x))
         self.d_loss_fake = tf.reduce_mean(tf.abs(AE_G - G))
 
         self.d_loss = self.d_loss_real - self.k_t * self.d_loss_fake
         self.g_loss = tf.reduce_mean(tf.abs(AE_G - G))
-        self.g_r_loss = tf.reduce_mean(tf.abs(G_r - self.z))#tf.nn.sigmoid_cross_entropy_with_logits(labels=self.z, logits=G_r)
 
         d_optim = d_optimizer.minimize(self.d_loss, var_list=self.D_var)
-        g_r_optim = g_r_optimizer.minimize(self.g_r_loss, var_list=self.G_r_var)
         g_optim = g_optimizer.minimize(self.g_loss, global_step=self.step, var_list=self.G_var)
 
         self.balance = self.gamma * self.d_loss_real - self.g_loss
@@ -239,14 +273,32 @@ class Trainer(object):
             tf.summary.scalar("loss/d_loss_real", self.d_loss_real),
             tf.summary.scalar("loss/d_loss_fake", self.d_loss_fake),
             tf.summary.scalar("loss/g_loss", self.g_loss),
-            tf.summary.scalar("loss/g_r_loss", self.g_r_loss),
             tf.summary.scalar("misc/measure", self.measure),
             tf.summary.scalar("misc/k_t", self.k_t),
             tf.summary.scalar("misc/d_lr", self.d_lr),
             tf.summary.scalar("misc/g_lr", self.g_lr),
-            tf.summary.scalar("misc/g_r_lr", self.g_r_lr),
             tf.summary.scalar("misc/balance", self.balance),
         ])
+
+    def build_reverse_model(self):
+        G_r, self.G_r_var = GeneratorRCNN(self.G_, self.channel, self.z_num, self.repeat_num,
+                                          self.conv_hidden_num, self.data_format)
+        with tf.variable_scope("build_reverse") as vs:
+            g_r_optimizer = tf.train.AdamOptimizer(self.g_r_lr)
+            #p = tf.Print(self.z, [self.z[0]], message='reverse_model')
+            #self.g_r_loss = tf.reduce_mean(tf.square(G_r - self.z))/2.
+            #p = tf.map_fn(lambda v: v.name, self.G_r_var)
+            #print(self.G_r_var)
+            self.g_r_loss = tf.reduce_mean(tf.square(G_r - self.z))/2.
+            self.g_r_lossl1 = tf.reduce_mean(tf.abs(G_r - self.z))
+            self.g_r_optim = g_r_optimizer.minimize(self.g_r_lossl1, self.step, var_list=self.G_r_var)
+
+        self.summary_op_r = tf.summary.merge([
+            tf.summary.scalar("loss/g_r_loss", self.g_r_loss),
+            tf.summary.scalar("loss/g_r_lossl1", self.g_r_lossl1),
+            tf.summary.scalar("misc/g_r_lr", self.g_r_lr),
+        ])
+        return tf.contrib.framework.get_variables(vs)
 
     def build_test_model(self):
         with tf.variable_scope("test") as vs:
