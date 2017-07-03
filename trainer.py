@@ -62,6 +62,10 @@ class Trainer(object):
 
         self.g_lr = tf.Variable(config.g_lr, name='g_lr')
         self.d_lr = tf.Variable(config.d_lr, name='d_lr')
+        self.g_r_lr = tf.Variable(config.g_r_lr, name='g_r_lr')
+        self.g_r_lr_update = tf.assign(self.g_r_lr,
+                                               tf.maximum(self.g_r_lr * 0.5, config.lr_lower_boundary),
+                                               name='g_r_lr_update')
 
         self.g_lr_update = tf.assign(self.g_lr, tf.maximum(self.g_lr * 0.5, config.lr_lower_boundary), name='g_lr_update')
         
@@ -91,7 +95,7 @@ class Trainer(object):
         self.lr_update_step = config.lr_update_step
 
         self.is_train = config.is_train
-        self.build_model()
+        self.build_model2()
         
         if config.reverse:
             loadable = variables._all_saveable_objects()
@@ -176,6 +180,7 @@ class Trainer(object):
                 fetch_dict.update({
                     "summary": self.summary_op,
                     "g_loss": self.g_loss,
+                    "g_r_loss": self.g_rr_loss,
                     "d_loss": self.d_loss,
                     "k_t": self.k_t,
                 })
@@ -189,27 +194,37 @@ class Trainer(object):
                 self.summary_writer.flush()
 
                 g_loss = result['g_loss']
+                g_r_loss = result['g_r_loss']
                 d_loss = result['d_loss']
                 k_t = result['k_t']
 
-                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f}  measure: {:.4f}, k_t: {:.4f}". \
-                      format(step, self.max_step, d_loss, g_loss, measure, k_t))
+                print("[{}/{}] Loss_D: {:.6f} Loss_G: {:.6f} Loss_G_r: {:.6f} measure: {:.4f}, k_t: {:.4f}". \
+                      format(step, self.max_step, d_loss, g_loss, g_r_loss, measure, k_t))
 
             if step % (self.log_step * 40) == 0:
                 large_fake = None
+                large_fake2 = None
                 x_fake = None
                 z_fixed_ = z_fixed
                 for i in range(6):
-                    x_fake = self.generate(z_fixed_, self.model_dir, idx=step)
+                    x_fake = self.generate(self.G, 'G', z_fixed_, self.model_dir, idx=step)
+                    x_fake2 = self.generate(self.G2, 'G2', z_fixed_, self.model_dir, idx=step)
                     if large_fake is None:
                         large_fake = x_fake
                     else:
                         large_fake = np.concatenate([large_fake, x_fake])
+                    if large_fake2 is None:
+                        large_fake2 = x_fake2
+                    else:
+                        large_fake2 = np.concatenate([large_fake2, x_fake2])
                     z_fixed_ = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
                 #print(large_fake.shape)
                 f = '{}/{}_G.png'.format(self.model_dir, step)
+                f2 = '{}/{}_G2.png'.format(self.model_dir, step)
                 save_image(large_fake, f, nrow=8)
+                save_image(large_fake2, f2, nrow=8)
                 print("[*] Samples saved: {}".format(f))
+                print("[*] Samples saved: {}".format(f2))
                 self.autoencode(x_fixed, self.model_dir, idx=step, x_fake=x_fake)
                 self.interpolate_live_G(z_fixed, self.model_dir, idx=step)
 
@@ -218,6 +233,81 @@ class Trainer(object):
                 #cur_measure = np.mean(measure_history)
                 #if cur_measure > prev_measure * 0.99:
                 #prev_measure = cur_measure
+
+    def build_model2(self):
+        self.x = self.data_loader
+        x = norm_img(self.x)
+
+        self.z = tf.random_uniform(
+                (tf.shape(x)[0], self.z_num), minval=-1.0, maxval=1.0)
+        #k = tf.Print(self.z, [self.z[0]], message='base model: ')
+        self.k_t = tf.Variable(0., trainable=False, name='k_t')
+
+        G, self.G_var = GeneratorCNN(
+                self.z, self.conv_hidden_num, self.channel,
+                self.repeat_num, reuse=False, data_format=self.data_format)
+        self.G_ = G
+
+        G_r, self.G_r_var = GeneratorRCNN(G, self.channel, self.z_num, self.repeat_num,
+                                          self.conv_hidden_num, self.data_format)
+
+        G2, G2_var = GeneratorCNN(
+            G_r, self.conv_hidden_num, self.channel, self.repeat_num,
+            reuse=True, data_format=self.data_format)
+        
+        d_out, self.D_z, self.D_var = DiscriminatorCNN(
+                tf.concat([G, x], 0), self.channel, self.z_num, self.repeat_num,
+                self.conv_hidden_num, self.data_format)
+        AE_G, AE_x = tf.split(d_out, 2)
+
+        self.G = denorm_img(G, self.data_format)
+        self.G2 = denorm_img(G2, self.data_format)
+        self.AE_G, self.AE_x = denorm_img(AE_G, self.data_format), denorm_img(AE_x, self.data_format)
+
+        if self.optimizer == 'adam':
+            optimizer = tf.train.AdamOptimizer
+        else:
+            raise Exception("[!] Caution! Paper didn't use {} opimizer other than Adam".format(config.optimizer))
+
+        g_optimizer, d_optimizer = optimizer(self.g_lr), optimizer(self.d_lr)
+        g_rr_optimizer = optimizer(self.g_r_lr)
+
+        self.d_loss_real = tf.reduce_mean(tf.abs(AE_x - x))
+        self.d_loss_fake = tf.reduce_mean(tf.abs(AE_G - G))
+
+        self.d_loss = self.d_loss_real - self.k_t * self.d_loss_fake
+        self.g_loss = tf.reduce_mean(tf.abs(AE_G - G))
+        self.g_rr_loss = tf.reduce_mean(tf.abs(G - tf.reverse(tf.transpose(G2, [0, 1, 3, 2]), [2])))
+
+        d_optim = d_optimizer.minimize(self.d_loss, var_list=self.D_var)
+        g_optim = g_optimizer.minimize(self.g_loss, global_step=self.step, var_list=self.G_var)
+        g_rr_optim = g_rr_optimizer.minimize(self.g_rr_loss, var_list=self.G_r_var)
+
+        self.balance = self.gamma * self.d_loss_real - self.g_loss
+        self.measure = self.d_loss_real + tf.abs(self.balance)
+
+        with tf.control_dependencies([d_optim, g_optim, g_rr_optim]):
+            self.k_update = tf.assign(
+                self.k_t, tf.clip_by_value(self.k_t + self.lambda_k * self.balance, 0, 1))
+
+        self.summary_op = tf.summary.merge([
+            tf.summary.image("G", self.G),
+            tf.summary.image("G2", self.G2),
+            tf.summary.image("AE_G", self.AE_G),
+            tf.summary.image("AE_x", self.AE_x),
+
+            tf.summary.scalar("loss/d_loss", self.d_loss),
+            tf.summary.scalar("loss/d_loss_real", self.d_loss_real),
+            tf.summary.scalar("loss/d_loss_fake", self.d_loss_fake),
+            tf.summary.scalar("loss/g_loss", self.g_loss),
+            tf.summary.scalar("loss/g_rr_loss", self.g_rr_loss),
+            tf.summary.scalar("misc/measure", self.measure),
+            tf.summary.scalar("misc/k_t", self.k_t),
+            tf.summary.scalar("misc/d_lr", self.d_lr),
+            tf.summary.scalar("misc/g_lr", self.g_lr),
+            tf.summary.scalar("misc/g_r_lr", self.g_r_lr),
+            tf.summary.scalar("misc/balance", self.balance),
+        ])
 
     def build_model(self):
         self.x = self.data_loader
@@ -318,10 +408,10 @@ class Trainer(object):
         test_variables = tf.contrib.framework.get_variables(vs)
         self.sess.run(tf.variables_initializer(test_variables))
 
-    def generate(self, inputs, root_path=None, path=None, idx=None, save=True):
-        x = self.sess.run(self.G, {self.z: inputs})
+    def generate(self, model, name, inputs, root_path=None, path=None, idx=None, save=True):
+        x = self.sess.run(model, {self.z: inputs})
         if path is None and save:
-            path = os.path.join(root_path, '{}_G.png'.format(idx))
+            path = os.path.join(root_path, '{}_{}.png'.format(idx, name))
             #save_image(x, path)
             #print("[*] Samples saved: {}".format(path))
         return x
@@ -355,7 +445,7 @@ class Trainer(object):
         generated = []
         for _, ratio in enumerate(np.linspace(0, 1, 10)):
             z = np.stack([slerp(ratio, r1, r2) for r1, r2 in zip(z_fixed, z_flex)])
-            z_decode = self.generate(z, save=False)
+            z_decode = self.generate(self.G, 'G', z, save=False)
             generated.append(z_decode)
 
         generated = np.stack(generated).transpose([1, 0, 2, 3, 4])
@@ -380,7 +470,7 @@ class Trainer(object):
         generated = []
         for idx, ratio in enumerate(np.linspace(0, 1, 10)):
             z = np.stack([slerp(ratio, r1, r2) for r1, r2 in zip(z1, z2)])
-            z_decode = self.generate(z, save=False)
+            z_decode = self.generate(self.G, 'G', z, save=False)
             generated.append(z_decode)
 
         generated = np.stack(generated).transpose([1, 0, 2, 3, 4])
@@ -426,7 +516,7 @@ class Trainer(object):
             #self.interpolate_D(real1_batch, real2_batch, step, root_path)
 
             z_fixed = np.random.uniform(-1, 1, size=(self.batch_size, self.z_num))
-            G_z = self.generate(z_fixed, path=os.path.join(root_path, "test{}_G_z.png".format(step)))
+            G_z = self.generate(self.G, 'G', z_fixed, path=os.path.join(root_path, "test{}_G_z.png".format(step)))
 
             if all_G_z is None:
                 all_G_z = G_z
